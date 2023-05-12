@@ -172,9 +172,6 @@ namespace PPList2DataList
         
         private static string Parse(string program, PPInfo info)
         {
-            if (!program.Contains("MEEE!!!") || program.Contains("string Parse("))
-                return program;
-            
             var programSyntaxTree = CSharpSyntaxTree.ParseText(program, CSharpParseOptions.Default.WithDocumentationMode(DocumentationMode.None).WithPreprocessorSymbols(Defines).WithLanguageVersion(LanguageVersion.CSharp7_3));
 
             Compilation compilation = CSharpCompilation.Create("MyProgram", new[] { programSyntaxTree });
