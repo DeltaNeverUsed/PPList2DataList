@@ -1,14 +1,18 @@
-﻿using System.Collections.Generic;
+﻿//#define DebugStuff
+
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using UnityEditor;
-using UnityEngine;
 using USPPPatcher;
 
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using USPPPatcher.Editor;
+
+using VRC.SDK3.Data;
+
 
 namespace PPList2DataList
 {
@@ -61,15 +65,15 @@ namespace PPList2DataList
             var rx = new Regex("List<[A-Za-z<> ,\\[\\]]+>");
             var newString = rx.Replace(currText, "DataList");
             
-            Debug.Log($"New: {newString}, old: {currText}");
-
             var start = GetOffset(node.SpanStart);
             Program = Program.Remove(start, node.Span.Length)
                 .Insert(start, newString);
                             
             AddOffset(node.Span.Start, newString.Length - currText.Length);
             
+#if DebugStuff
             Debug.Log($"<color=#FF4040>VarDec</color> '{currText}'");
+#endif
             base.VisitVariableDeclaration(node);
         }
 
@@ -90,8 +94,9 @@ namespace PPList2DataList
                 return;
             }
             
+#if DebugStuff
             Debug.Log($"<color=#20FF40>Assignment</color> '{currText}, {node.Right.GetText()}'");
-            
+#endif
             var start = GetOffset(node.Right.Span.Start);
             var newAccess = "new DataList()";
                             
@@ -103,11 +108,21 @@ namespace PPList2DataList
             base.VisitAssignmentExpression(node);
         }
 
+        private bool DataTokenType(ref string type)
+        {
+            var s = type;
+            var thingy = Enum.GetNames(typeof(TokenType)).SingleOrDefault(x => x.Equals(s, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(thingy))
+            {
+                type = thingy;
+                return false;
+            }
+            return true;
+        }
+
         public override void VisitElementAccessExpression(ElementAccessExpressionSyntax node)
         {
             var currText = node.GetText();
-            Debug.Log($"<color=#008040>ElementAccess</color> '{currText}'");
-            
 
             if (node.Expression is IdentifierNameSyntax identifierName)
             {
@@ -119,11 +134,19 @@ namespace PPList2DataList
                     {
                         // get the type argument(s) and format the full type name
                         var typeArgs = namedTypeSymbol.TypeArguments;
-                        Debug.Log(
-                            $"<color=#000088>List variable</color> '{namedTypeSymbol.Name}' has type '<color=blue>{typeArgs.First().Name}</color>'");
-
+#if DebugStuff
+                        Debug.Log($"<color=#000088>List variable</color> '{namedTypeSymbol.Name}' has type '<color=blue>{typeArgs.First().ToDisplayString()}</color>'");
+#endif
                         var start = GetOffset(node.Span.Start);
-                        var newAccess = currText + "." + typeArgs.First().Name;
+
+                        // Replace the original List[x] with List[x].Type and some times ((Type)List[x].Reference) for unsupported values
+                        var typeName = typeArgs.First().ToDisplayString();
+                        var t = DataTokenType(ref typeName);
+                        var newAccess = "";
+                        if (!t)
+                            newAccess = currText + "." + typeName;
+                        else
+                            newAccess = "((" + typeName + ")" + currText + ".Reference)";
                             
                         Program = Program.Remove(start, node.Span.Length)
                             .Insert(start, newAccess);
@@ -152,58 +175,15 @@ namespace PPList2DataList
             if (!program.Contains("MEEE!!!") || program.Contains("string Parse("))
                 return program;
             
-            
             var programSyntaxTree = CSharpSyntaxTree.ParseText(program, CSharpParseOptions.Default.WithDocumentationMode(DocumentationMode.None).WithPreprocessorSymbols(Defines).WithLanguageVersion(LanguageVersion.CSharp7_3));
 
             Compilation compilation = CSharpCompilation.Create("MyProgram", new[] { programSyntaxTree });
 
             var syntaxWalker = new SemanticModelWalker(program, compilation.GetSemanticModel(programSyntaxTree));
             syntaxWalker.Visit(programSyntaxTree.GetRoot());
-            
+#if DebugStuff
             Debug.Log("<color=red>Code:</color>\n\n"+syntaxWalker.Program);
-            
-
-            /*
-            var t = info.Analyzer.GetVariablesInSpaceByType(@"\bList<([\w]*)>");
-
-            foreach (var list in t)
-            {
-                var match = Regex.Match(list.Type, @"^(List)<([A-Za-z0-9_\.]+)>$");
-            
-                var subType = match.Groups[2].Value;
-
-                var defLen = program.IndexOf(' ', list.Index) - list.Index;
-                modified = modified.Remove(list.Index, defLen);
-                modified = modified.Insert(list.Index, $"DataList");
-                info.Analyzer.OffsetEverything(list.Index, defLen, "DataList");
-
-                foreach (var use in list.Uses)
-                {
-                    var end = modified.IndexOf(';', use);
-                    var subStr = modified.Substring(use, end - use);
-                    if (subStr.Contains("new "))
-                    {
-                        subStr = Regex.Replace(subStr, @"List<([A-Za-z0-9_\.]+)>", "DataList");
-                        modified = modified.Remove(use, end - use).Insert(use, subStr);
-                    }
-                    else if (subStr.Contains('='))
-                    {
-                        
-                    }
-                    else
-                    {
-                        var re = @"\b"+list.Name+@"(?!\s*=)(?!\s*\.)\b";
-                        var s = Regex.Match(subStr, re);
-                        re = @"\[(?:[^\[\]]*(?:\[(?<Depth>)|\](?<-Depth>))*(?(Depth)(?!)))?\]";
-                        var d = Regex.IsMatch(subStr, re);
-                        Debug.Log("A_ "+s.Value + " d_ " + d);
-                    }
-                }
-                
-                Debug.Log(ObjectDumper.Dump(list));
-            }
-            
-            Debug.Log(modified);*/
+#endif
             return syntaxWalker.Program;
         }
         
@@ -228,7 +208,7 @@ namespace PPList2DataList
         private static void Subscribe()
         {
             Defines = GetProjectDefines();
-            PPHandler.Subscribe(Parse, 1, "Example Text Replacer", true);
+            PPHandler.Subscribe(Parse, 1, "Example Text Replacer");
         }
     }
 }
